@@ -1,6 +1,12 @@
+import os
+import re
 import uuid
+import pickle
+
+from dotenv import load_dotenv
+import arxiv
 from langchain.docstore import InMemoryDocstore
-from langchain_community.document_loaders import WebBaseLoader
+from langchain_community.document_loaders import PyMuPDFLoader, WebBaseLoader
 from langchain.retrievers.multi_vector import MultiVectorRetriever
 from langchain.storage import InMemoryByteStore
 from langchain_community.vectorstores import Chroma
@@ -8,61 +14,98 @@ from langchain_openai import OpenAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 from langchain_openai import ChatOpenAI
-from ragatouille import RAGPretrainedModel
-import requests
 
 load_dotenv()
 os.environ['LANGCHAIN_TRACING_V2'] = 'true'
 os.environ['LANGCHAIN_ENDPOINT'] = 'https://api.smith.langchain.com'
 os.environ['LANGCHAIN_API_KEY'] = os.getenv('LANGCHAIN_API_KEY')
 os.environ['LANGCHAIN_PROJECT'] = 'RAG_Modular_Script'
-os.environ['OPENAI_API_KEY'] = os.getenv('OPENAI_API_KEY')  
+os.environ['OPENAI_API_KEY'] = os.getenv('OPENAI_API_KEY') 
+
+CHROMA_PATH = "./chroma_db"
+DOCSTORE_PATH = "./parent_docs_store"
+CACHE_DOCS_FILE = "documents_cache.pkl"
 
 
-def load_documents(urls):
-    """Loads documents from a list of URLs."""
-    all_docs = []
-    for url in urls:
-        loader = WebBaseLoader(url)
-        all_docs.extend(loader.load())
-    return all_docs
-
-def get_wikipedia_page(title: str):
-    """Retrieve the full text content of a Wikipedia page."""
-    URL = "https://en.wikipedia.org/w/api.php"
-    params = {
-        "action": "query",
-        "format": "json",
-        "titles": title,
-        "prop": "extracts",
-        "explaintext": True,
-    }
-    headers = {"User-Agent": "RAGatouille_tutorial/0.0.1 (ben@clavie.eu)"}
-    response = requests.get(URL, params=params, headers=headers)
-    data = response.json()
-    page = next(iter(data["query"]["pages"].values()))
-    return page["extract"] if "extract" in page else None
-
+def get_metadata_from_files(directory):
+    client = arxiv.Client()
+    # Regex to find standard arXiv ID patterns in filenames
+    id_pattern = re.compile(r'(\d{4}\.\d{4,5})') 
+    metaData = []
+    documents = []
+    
+    for filename in os.listdir(directory):
+        if filename.endswith(".pdf"):
+            match = id_pattern.search(filename)
+            if match:
+                arxiv_id = match.group(1)
+                
+                # Search for this specific ID
+                search = arxiv.Search(id_list=[arxiv_id])
+                result = next(client.results(search))
+                length=0
+                with open(os.path.join(directory, filename), "rb") as f:
+                    # content = f.read()
+                    loader = PyMuPDFLoader(os.path.join(directory, filename))
+                    pages = loader.load()
+                    full_text = " ".join([page.page_content for page in pages])
+                    length = len(full_text)
+                    documents.append(Document(page_content=full_text, 
+                                    metadata={"title": result.title, 
+                                    "authors": [a.name for a in result.authors], 
+                                    "published": result.published.year if result.published else None,
+                                    "length": length}))
+                    metaData.append({
+                        "title": result.title,
+                        "authors": [a.name for a in result.authors],
+                        "published": result.published.year if result.published else None,
+                        "length" : length
+                    })
+            else:
+                documents.append(Document(page_content="",
+                                         metadata={"title": "Unknown",
+                                         "authors": [], "published": None, "length": 0}))
+                metaData.append({
+                    "title": "Unknown",
+                    "authors": [],
+                    "published": None,
+                    "length": 0
+                })
+    
+    # Save to cache
+    with open(CACHE_DOCS_FILE, 'wb') as f:
+        pickle.dump(documents, f)
+    
+    print("Data processed and cached.")
+    return metaData, documents  
 
 def get_summaries(docs, llm_model="gpt-4o-mini"):
     """Generates summaries for a list of documents using an LLM."""
     llm = ChatOpenAI(model=llm_model, temperature=0)
     summaries = []
     for doc in docs:
-        summary = llm.invoke(f"Summarize the following document: {doc.page_content[:1000]}...").content # Limit to first 1000 chars for brevity
+        prompt = f"""Summarize the following arXiv research paper titled "{doc.metadata['title']}". 
+        
+        Paper Content:
+        {doc.page_content}"""
+        summary = llm.invoke(prompt).content 
         summaries.append(summary)
     return summaries
 
-def create_summary_based_retriever(docs, llm_model="gpt-4o-mini"):
+def create_summary_based_retriever(docs, llm_model="gpt-4o-mini",skip_indexing=False):
     """Creates a summary-based MultiVectorRetriever."""
     # Generate summaries
-    summaries = get_summaries(docs, llm_model)
+    # summaries = get_summaries(docs, llm_model)
 
     # The vectorstore to use to index the child chunks (summaries)
-    vectorstore = Chroma(collection_name="summaries_collection", embedding_function=OpenAIEmbeddings())
+    vectorstore = Chroma(collection_name="summaries_collection", 
+                        embedding_function=OpenAIEmbeddings(),
+                        persist_directory=CHROMA_PATH)
 
-    # The storage layer for the parent documents
-    store = InMemoryByteStore()
+    # Initialize the DocStore (Persistent Local File Store)
+    fs = LocalFileStore(DOCSTORE_PATH)
+    # create_kv_docstore ensures Document objects are serialized correctly to disk
+    store = create_kv_docstore(fs)
     id_key = "doc_id"
 
     # The retriever
@@ -72,35 +115,57 @@ def create_summary_based_retriever(docs, llm_model="gpt-4o-mini"):
         id_key=id_key,
     )
 
-    doc_ids = [str(uuid.uuid4()) for _ in docs]
+    if not skip_indexing:
+        print("Generating summaries and indexing...")
+        summaries = get_summaries(docs, llm_model)
+        doc_ids = [str(uuid.uuid4()) for _ in docs]
 
-    # Docs linked to summaries
-    summary_docs = [
-        Document(page_content=s, metadata={id_key: doc_ids[i]})
-        for i, s in enumerate(summaries)
-    ]
+        summary_docs = [
+            Document(page_content=s, metadata={id_key: doc_ids[i], **docs[i].metadata})
+            for i, s in enumerate(summaries)
+        ]
 
-    # Add summaries to vectorstore
-    retriever.vectorstore.add_documents(summary_docs)
-
-    # Add original documents to docstore
-    retriever.docstore.mset(list(zip(doc_ids, docs)))
-
-    print("Summary-based retriever created successfully.")
+        # Add to persistent storage
+        retriever.vectorstore.add_documents(summary_docs)
+        retriever.docstore.mset(list(zip(doc_ids, docs)))
+        print("Indexing complete.")
+    else:
+        print("Retriever re-connected to persistent storage.")
+    
     return retriever
 
-def create_colbert_retriever(collection_data, index_name, model_name="colbert-ir/colbertv2.0"):
-    """Creates a ColBERT-based RAGatouille retriever."""
-    RAG = RAGPretrainedModel.from_pretrained(model_name)
-    RAG.index(
-        collection=collection_data,
-        index_name=index_name,
-        max_document_length=180,
-        split_documents=True,
-    )
-    print(f"ColBERT index '{index_name}' created successfully.")
-    retriever = RAG.as_langchain_retriever(k=3)
-    return retriever
+
+def indexing():
+    # 1. Check if we have already indexed everything
+    if os.path.exists(CHROMA_PATH) and os.path.exists(CACHE_DOCS_FILE):
+        print("Loading existing index and documents...")
+        with open(CACHE_DOCS_FILE, 'rb') as f:
+            docs = pickle.load(f)
+        
+        # Re-initialize the retriever from disk
+        return create_summary_based_retriever(docs, skip_indexing=True)
+
+    # 2. If not, run the full pipeline
+    print("No cache found. Starting full indexing pipeline...")
+    metaData, docs = get_metadata_from_files("./arxiv_papers")
+    return create_summary_based_retriever(docs, skip_indexing=False)
+
+
+
+
+
+# def create_colbert_retriever(collection_data, index_name, model_name="colbert-ir/colbertv2.0"):
+#     """Creates a ColBERT-based RAGatouille retriever."""
+#     RAG = RAGPretrainedModel.from_pretrained(model_name)
+#     RAG.index(
+#         collection=collection_data,
+#         index_name=index_name,
+#         max_document_length=180,
+#         split_documents=True,
+#     )
+#     print(f"ColBERT index '{index_name}' created successfully.")
+#     retriever = RAG.as_langchain_retriever(k=3)
+#     return retriever
 
 # --- Example Usage --- 
 

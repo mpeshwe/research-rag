@@ -7,11 +7,9 @@ from dotenv import load_dotenv
 import arxiv
 from langchain_community.document_loaders import PyMuPDFLoader
 from langchain_classic.retrievers.multi_vector import MultiVectorRetriever
-# from langchain_community.storage import LocalFileStore
-# from langchain_core.stores import LocalFileStore
-# from langchain.storage import create_kv_docstore
 from langchain_core.prompts import ChatPromptTemplate, HumanMessagePromptTemplate
 from langchain_core.stores import InMemoryByteStore
+# from langchain_community.vectorstores import Chroma
 from langchain_chroma import Chroma
 from langchain_openai import OpenAIEmbeddings
 from langchain_core.documents import Document
@@ -37,7 +35,7 @@ def get_metadata_from_files(directory):
     # metaData = []
     documents = []
     
-    for filename in os.listdir(directory)[:30]:  # Limit to first 30 files for testing
+    for filename in os.listdir(directory)[:10]:  # Limit to first 30 files for testing
         if filename.endswith(".pdf"):
             match = id_pattern.search(filename)
             if match:
@@ -52,33 +50,34 @@ def get_metadata_from_files(directory):
                     pages = loader.load()
                     full_text = " ".join([page.page_content for page in pages])
                     length = len(full_text)
-                    MAX_WORDS = 3000  # Limit to first 3000 words for metadata storage
-                    words = full_text.split()
-                    truncated_text = " ".join(words[:MAX_WORDS])
+                    # MAX_WORDS = 3000  # Limit to first 3000 words for metadata storage
+                    # words = full_text.split()
+                    # truncated_text = " ".join(words[:MAX_WORDS])
                 except Exception as e:
                     print(f"Error loading {filename}: {e}")
                     full_text = ""
+                    # truncated_text = ""
                     length = 0
-                documents.append(Document(page_content=truncated_text, 
+                documents.append(Document(page_content=full_text, 
                                 metadata={"title": result.title, 
                                 "authors": [a.name for a in result.authors], 
-                                "published": result.published.year if result.published else None,
-                                "length": length}))
+                                "published_year": result.published.year if result.published else None,
+                                "word_count": length}))
                 # metaData.append({
                 #     "title": result.title,
                 #     "authors": [a.name for a in result.authors],
-                #     "published": result.published.year if result.published else None,
-                #     "length" : length
+                #     "published_year": result.published.year if result.published else None,
+                #     "word_count" : length
                 # })
             else:
                 documents.append(Document(page_content="",
                                          metadata={"title": "Unknown",
-                                         "authors": [], "published": None, "length": 0}))
+                                         "authors": [], "published_year": None, "word_count": 0}))
                 # metaData.append({
                 #     "title": "Unknown",
                 #     "authors": [],
-                #     "published": None,
-                #     "length": 0
+                #     "published_year": None,
+                #     "word_count": 0
                 # })
     
     # Save to cache
@@ -167,7 +166,7 @@ def create_summary_based_retriever(docs, llm_model="gpt-4o-mini",skip_indexing=F
     else:
         print("Retriever re-connected to persistent storage.")
         
-        return retriever
+    return retriever
 
 
 def indexing():
@@ -187,16 +186,15 @@ def indexing():
     return create_summary_based_retriever(docs, skip_indexing=False)
 
 #you have to deserialize the retrieved docs when you are using them
-def deserialize_docs(query,retriever):
-    results = retriever.get_relevant_documents(query)
-    docs = [
+def deserialize_docs(docs):
+    final_docs = [
         pickle.loads(doc) if isinstance(doc, bytes) else doc
-        for doc in results
+        for doc in docs
     ]
-    return docs
+    return final_docs
 
 
-# indexing()
+indexing()
 
 
 

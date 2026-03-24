@@ -1,7 +1,7 @@
-from langchain.retrievers.self_query.base import SelfQueryRetriever
 from langchain_core.language_models import BaseLanguageModel
 from langchain_core.vectorstores import VectorStore
-
+from langchain.retrievers.self_query.base import SelfQueryRetriever
+from langchain.chains.query_constructor.base import AttributeInfo
 
 # class TutorialSearch(BaseModel):
 #     """Search over a database of tutorial videos about a software library."""
@@ -64,26 +64,26 @@ def construct_self_query_retriever(vectorstore: VectorStore, llm: BaseLanguageMo
     """
     # Define metadata field info
     metadata_field_info = [
-        {
-            "name": "title",
-            "description": "The title of the paper",
-            "type": "string",
-        },
-        {
-            "name": "authors",
-            "description": "The authors of the paper",
-            "type": "string",
-        },
-        {
-            "name": "published_year",
-            "description": "The year the paper was published",
-            "type": "integer",
-        },
-        {
-            "name": "word_count",
-            "description": "The number of words in the paper content",
-            "type": "integer",
-        },
+        AttributeInfo(
+            name="title",
+            description="The title of the paper",
+            type="string",
+        ),
+        AttributeInfo(
+            name="authors",
+            description="The authors of the paper",
+            type="string",
+        ),
+        AttributeInfo(
+            name="published_year",
+            description="The year the paper was published",
+            type="integer",
+        ),
+        AttributeInfo(
+            name="word_count",
+            description="The number of words in the paper content",
+            type="integer",
+        ),
     ]
     
     # Create the document content description
@@ -96,9 +96,14 @@ def construct_self_query_retriever(vectorstore: VectorStore, llm: BaseLanguageMo
         document_contents=document_content_description,
         metadata_field_info=metadata_field_info,
         verbose=True,
+        enable_limit=True,        # ← LLM decides how many docs to fetch
+        search_kwargs={"k": 2}    # ← acts as the max/default cap
     )
     
     return retriever
+
+# retriever.invoke("papers about reinforcement learning after 2021")
+# gives you the list of docs
 
 # No need of this when using SelfQueryRetriever, since it constructs the query internally 
 # based on the metadata fields and document content description

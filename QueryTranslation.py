@@ -15,7 +15,7 @@ import numpy as np
 
 # Set up environment variables (replace with your actual keys or use environment variables)
 # For LangChain tracing
-load_dotenv()
+load_dotenv("environmentVariables.env")
 os.environ['LANGCHAIN_TRACING_V2'] = 'true'
 os.environ['LANGCHAIN_ENDPOINT'] = 'https://api.smith.langchain.com'
 os.environ['LANGCHAIN_API_KEY'] = os.getenv('LANGCHAIN_API_KEY')
@@ -69,6 +69,28 @@ def get_rag_prompt():
     """
     client = Client()
     return client.pull_prompt("rlm/rag-prompt")
+
+def get_multi_query_chain_only_queries(llm):
+    """ Return the 5 different versions of the given user question to 
+    retrieve relevant documents from a vector database. By generating multiple 
+    perspectives on the user question, your goal is to help the user overcome some 
+    of the limitations of the distance-based similarity search."""
+
+
+    template = """You are an AI language model assistant. Your task is to generate five
+    different versions of the given user question to retrieve relevant documents from a vector
+    database. By generating multiple perspectives on the user question, your goal is to help
+    the user overcome some of the limitations of the distance-based similarity search.
+    Provide these alternative questions separated by newlines. Original question: {question}"""
+    prompt_perspectives = ChatPromptTemplate.from_template(template)
+
+    generate_queries = (
+        prompt_perspectives
+        | llm
+        | StrOutputParser()
+        | (lambda x: x.split("\n"))
+    )
+    return generate_queries
 
 
 def get_multi_query_rag_chain(retriever, llm):
@@ -302,37 +324,37 @@ def get_hyde_rag_chain(retriever, llm):
     return final_rag_chain
 
 
-# --- Example Usage ---
-if __name__ == "__main__":
-    # 1. Setup RAG components
-    blog_url = "https://lilianweng.github.io/posts/2023-06-23-agent/"
-    base_retriever, base_llm = setup_rag_components(blog_url)
+# # --- Example Usage ---
+# if __name__ == "__main__":
+#     # 1. Setup RAG components
+#     blog_url = "https://lilianweng.github.io/posts/2023-06-23-agent/"
+#     base_retriever, base_llm = setup_rag_components(blog_url)
 
-    question = "What is Task Decomposition for LLM agents?"
+#     question = "What is Task Decomposition for LLM agents?"
 
-    print("\n--- Running Multi-Query RAG ---")
-    multi_query_chain = get_multi_query_rag_chain(base_retriever, base_llm)
-    response_multi_query = multi_query_chain.invoke(question)
-    print(f"Multi-Query Response: {response_multi_query}")
+#     print("\n--- Running Multi-Query RAG ---")
+#     multi_query_chain = get_multi_query_rag_chain(base_retriever, base_llm)
+#     response_multi_query = multi_query_chain.invoke(question)
+#     print(f"Multi-Query Response: {response_multi_query}")
 
-    print("\n--- Running RAG Fusion ---")
-    rag_fusion_chain = get_rag_fusion_rag_chain(base_retriever, base_llm)
-    response_rag_fusion = rag_fusion_chain.invoke({"question": question})
-    print(f"RAG Fusion Response: {response_rag_fusion}")
+#     print("\n--- Running RAG Fusion ---")
+#     rag_fusion_chain = get_rag_fusion_rag_chain(base_retriever, base_llm)
+#     response_rag_fusion = rag_fusion_chain.invoke({"question": question})
+#     print(f"RAG Fusion Response: {response_rag_fusion}")
 
-    print("\n--- Running Decomposition RAG ---")
-    # The decomposition chain is designed to be invoked with the original question.
-    # Its internal logic handles sub-question generation and iterative answering.
-    decomposition_chain = get_decomposition_rag_chain(base_retriever, base_llm)
-    response_decomposition = decomposition_chain.invoke({"question": question})
-    print(f"Decomposition Response: {response_decomposition}")
+#     print("\n--- Running Decomposition RAG ---")
+#     # The decomposition chain is designed to be invoked with the original question.
+#     # Its internal logic handles sub-question generation and iterative answering.
+#     decomposition_chain = get_decomposition_rag_chain(base_retriever, base_llm)
+#     response_decomposition = decomposition_chain.invoke({"question": question})
+#     print(f"Decomposition Response: {response_decomposition}")
 
-    print("\n--- Running Step-Back RAG ---")
-    step_back_chain = get_step_back_rag_chain(base_retriever, base_llm)
-    response_step_back = step_back_chain.invoke({"question": question})
-    print(f"Step-Back Response: {response_step_back}")
+#     print("\n--- Running Step-Back RAG ---")
+#     step_back_chain = get_step_back_rag_chain(base_retriever, base_llm)
+#     response_step_back = step_back_chain.invoke({"question": question})
+#     print(f"Step-Back Response: {response_step_back}")
 
-    print("\n--- Running HyDE RAG ---")
-    hyde_chain = get_hyde_rag_chain(base_retriever, base_llm)
-    response_hyde = hyde_chain.invoke({"question": question})
-    print(f"HyDE Response: {response_hyde}")
+#     print("\n--- Running HyDE RAG ---")
+#     hyde_chain = get_hyde_rag_chain(base_retriever, base_llm)
+#     response_hyde = hyde_chain.invoke({"question": question})
+#     print(f"HyDE Response: {response_hyde}")

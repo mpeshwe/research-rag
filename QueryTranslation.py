@@ -88,7 +88,7 @@ def get_multi_query_chain_only_queries(llm):
         prompt_perspectives
         | llm
         | StrOutputParser()
-        | (lambda x: x.split("\n"))
+        | (lambda x: [q.strip() for q in x.split("\n") if q.strip()])
     )
     return generate_queries
 

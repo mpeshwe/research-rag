@@ -97,7 +97,9 @@ def construct_self_query_retriever(vectorstore: VectorStore, llm: BaseLanguageMo
         metadata_field_info=metadata_field_info,
         verbose=True,
         enable_limit=True,        # ← LLM decides how many docs to fetch
-        search_kwargs={"k": 2}    # ← acts as the max/default cap
+        fix_invalid=True,        # ← if LLM generates an invalid query, it will try to fix it and re-run
+        search_kwargs={"k": 2}    # ← acts as the max/default cap 
+                                # kept small as less number of docs in sample space
     )
     
     return retriever

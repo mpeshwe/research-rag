@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Research RAG — A Self-Correcting RAG System</title>
+
+  <!-- reveal.js core -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/theme/black.css" id="theme" />
+  <!-- code highlighting -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/highlight/monokai.css" />
+
+  <style>
+    :root {
+      --accent: #4ea1ff;
+      --accent2: #27e0a0;
+      --warn: #ffce5a;
+      --bg: #11151c;
+      --panel: #1a212c;
+    }
+    .reveal { font-family: "Inter", "Segoe UI", system-ui, sans-serif; }
+    .reveal section { text-align: left; }
+    .reveal h1, .reveal h2, .reveal h3 { color: #fff; letter-spacing: -0.5px; font-weight: 800; }
+    .reveal h1 { font-size: 2.4em; }
+    .reveal .accent { color: var(--accent); }
+    .reveal .accent2 { color: var(--accent2); }
+    .reveal .warn { color: var(--warn); }
+    .reveal .muted { color: #93a1b3; }
+    .reveal .center { text-align: center; }
+    .reveal .small { font-size: 0.7em; }
+    .reveal .tiny { font-size: 0.55em; }
+    .reveal .kicker {
+      text-transform: uppercase; letter-spacing: 3px; font-size: 0.45em;
+      color: var(--accent); font-weight: 700; margin-bottom: 0.4em;
+    }
+    .reveal ul { line-height: 1.45; }
+    .reveal li { margin-bottom: 0.35em; }
+    .pill {
+      display: inline-block; padding: 4px 14px; border-radius: 999px;
+      background: rgba(78,161,255,0.14); border: 1px solid rgba(78,161,255,0.4);
+      color: #cfe6ff; font-size: 0.5em; margin: 4px 4px 4px 0; font-weight: 600;
+    }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; align-items: start; }
+    .grid3 { display: grid; grid-template-columns: repeat(3,1fr); gap: 18px; }
+    .card {
+      background: var(--panel); border: 1px solid #2a3442; border-radius: 14px;
+      padding: 18px 20px; box-shadow: 0 6px 24px rgba(0,0,0,0.3);
+    }
+    .card h3 { font-size: 0.85em; margin: 0 0 8px 0; }
+    .card p, .card ul { font-size: 0.62em; color: #c4d0de; margin: 0; }
+    .stagebadge {
+      display:inline-block; background: var(--accent); color:#06121f; font-weight:800;
+      border-radius: 8px; padding: 2px 12px; font-size: 0.5em; margin-bottom: 10px;
+    }
+    .mermaid { background: transparent !important; }
+    .reveal table { font-size: 0.55em; }
+    .reveal table th { color: var(--accent); border-bottom: 2px solid var(--accent); }
+    .reveal pre { width: 100%; box-shadow: 0 6px 24px rgba(0,0,0,0.4); }
+    .reveal pre code { max-height: 460px; font-size: 0.7em; border-radius: 10px; }
+    .footer {
+      position: absolute; bottom: 14px; left: 30px; font-size: 0.4em; color: #5d6b7d;
+    }
+    .big-num { font-size: 1.6em; font-weight: 800; color: var(--accent2); }
+    .quote { font-size: 1.1em; font-style: italic; color: #e6eef7; border-left: 4px solid var(--accent); padding-left: 20px; }
+  </style>
+</head>
+<body>
+<div class="reveal">
+  <div class="slides">
+
+    <!-- ============ 1. TITLE ============ -->
+    <section data-background-gradient="radial-gradient(circle at 30% 20%, #1d3b63 0%, #0c0f15 70%)">
+      <div class="kicker">RAG · LLM Engineering · LangGraph</div>
+      <h1>Research <span class="accent">RAG</span></h1>
+      <h3 class="muted" style="font-weight:500;">A self-correcting RAG system that searches arXiv —<br/>and checks its own work before answering.</h3>
+      <div style="margin-top: 34px;">
+        <span class="pill">LangChain</span>
+        <span class="pill">LangGraph</span>
+        <span class="pill">ChromaDB</span>
+        <span class="pill">GPT-4o-mini</span>
+        <span class="pill">Tavily</span>
+        <span class="pill">PyMuPDF</span>
+      </div>
+      <p class="small muted" style="margin-top:40px;">Built by <span class="accent2">mpeshwe</span> · <span class="accent2">namanmawandia</span></p>
+    </section>
+
+    <!-- ============ 2. THE PROBLEM ============ -->
+    <section data-background-color="#11151c">
+      <div class="kicker">The Problem</div>
+      <h2>Naive RAG answers <span class="warn">confidently wrong</span></h2>
+      <div class="grid2" style="margin-top:24px;">
+        <div>
+          <p class="muted">The standard recipe everyone ships:</p>
+          <ul>
+            <li>Embed the query</li>
+            <li>Grab nearest chunks</li>
+            <li>Generate an answer</li>
+          </ul>
+          <p style="margin-top:20px;">It breaks the moment retrieval returns something <span class="warn">irrelevant</span> — the model answers anyway, with full confidence.</p>
+        </div>
+        <div class="card">
+          <h3 class="warn">Three failure modes</h3>
+          <ul>
+            <li><b>Vocabulary mismatch</b> — one phrasing ≠ all phrasings of an idea</li>
+            <li><b>No structure</b> — "papers under 50k words" can't be a similarity search</li>
+            <li><b>No fallback</b> — if the corpus lacks the answer, it hallucinates</li>
+          </ul>
+        </div>
+      </div>
+      <p class="quote" style="margin-top:30px;">The magic isn't a bigger model — it's giving the system a way to <span class="accent2">know when it's wrong.</span></p>
+      <div class="footer">Research RAG</div>
+    </section>
+
+    <!-- ============ 3. WHAT IT IS ============ -->
+    <section data-background-color="#11151c">
+      <div class="kicker">Overview</div>
+      <h2>What is <span class="accent">Research RAG?</span></h2>
+      <p>A modular RAG system that intelligently searches and retrieves <b>arXiv research papers</b> using advanced query techniques + a corrective feedback loop.</p>
+      <div class="grid3" style="margin-top:24px;">
+        <div class="card"><h3 class="accent">Multi-angle queries</h3><p>Generates 5 semantic variants + RAG Fusion, HyDE, Step-Back & Decomposition.</p></div>
+        <div class="card"><h3 class="accent">Structured filtering</h3><p>LLM turns plain English into metadata filters: year, authors, word count.</p></div>
+        <div class="card"><h3 class="accent">Self-correction</h3><p>Grades its own retrievals; rewrites + web-searches when they fall short.</p></div>
+      </div>
+      <div class="center" style="margin-top:34px;">
+        <span class="big-num">5</span> <span class="muted">stage pipeline</span> &nbsp;·&nbsp;
+        <span class="big-num">6</span> <span class="muted">RAG strategies</span> &nbsp;·&nbsp;
+        <span class="big-num">1</span> <span class="muted">LangGraph feedback loop</span>
+      </div>
+      <div class="footer">Research RAG</div>
+    </section>
+
+    <!-- ============ 4. ARCHITECTURE ============ -->
+    <section data-background-color="#0d1017">
+      <div class="kicker">Architecture</div>
+      <h2>The 5-stage pipeline</h2>
+      <div class="mermaid" style="font-size:0.7em;">
+%%{init: {'theme':'dark','themeVariables':{'fontSize':'15px','primaryColor':'#1a212c','primaryBorderColor':'#4ea1ff','lineColor':'#4ea1ff','primaryTextColor':'#e6eef7'}}}%%
+flowchart TD
+    Q([User Question]) --> S1
+    S1["STAGE 1 · Ingestion &amp; Indexing<br/>arXiv → PyMuPDF → summaries → ChromaDB"] --> S2
+    S2["STAGE 2 · Query Translation<br/>5 query variants + optional strategies"] --> S3
+    S3["STAGE 3 · Construction &amp; Retrieval<br/>SelfQueryRetriever + metadata filters"] --> S4
+    S4{"STAGE 4 · Corrective RAG<br/>grade every doc — all relevant?"}
+    S4 -- Yes --> S5["STAGE 5 · Answer Generation<br/>rlm/rag-prompt → GPT-4o-mini · streamed"]
+    S4 -- No --> WS["Rewrite query → Web Search (Tavily)"] --> S5
+    S5 --> ANS([Grounded Answer])
+    style S4 fill:#3a2f0a,stroke:#ffce5a
+    style WS fill:#0d2c47,stroke:#4ea1ff
+    style S5 fill:#0c3326,stroke:#27e0a0
+      </div>
+      <div class="footer">Research RAG</div>
+    </section>
+
+    <!-- ============ 5. STAGE 1 ============ -->
+    <section data-background-color="#11151c">
+      <span class="stagebadge">STAGE 1</span>
+      <h2>Ingestion &amp; Indexing</h2>
+      <div class="grid2">
+        <div>
+          <ul>
+            <li><b>Download</b> papers from arXiv across 6 categories<br/><span class="tiny muted">cs.LG · stat.ML · cs.AI · cs.CL · cs.RO · cs.CR</span></li>
+            <li><b>Extract</b> full text + metadata via <span class="accent">PyMuPDF</span></li>
+            <li><b>Summarize</b> each paper with GPT-4o-mini</li>
+            <li><b>Index</b> summaries into <span class="accent">ChromaDB</span></li>
+            <li><b>Cache</b> docs + summaries to disk (pickle)</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3 class="accent2">Why cache?</h3>
+          <p>Embedding + summarizing every paper is the most expensive step. <code>documents_cache.pkl</code> and <code>summaries.pkl</code> mean you pay the OpenAI cost <b>once</b> — subsequent runs load instantly.</p>
+          <p style="margin-top:14px;"><span class="muted">Files:</span> <code>docDownload.py</code>, <code>indexing.py</code></p>
+        </div>
+      </div>
+      <div class="footer">Research RAG</div>
+    </section>
+
+    <!-- ============ 6. SUMMARY-BASED INDEXING ============ -->
+    <section data-background-color="#0d1017">
+      <span class="stagebadge">STAGE 1 · DEEP DIVE</span>
+      <h2>Summary-based indexing <span class="muted small">(MultiVectorRetriever)</span></h2>
+      <p class="small muted">Embed something small &amp; clean — return the full thing.</p>
+      <div class="mermaid" style="font-size:0.78em;">
+%%{init: {'theme':'dark','themeVariables':{'fontSize':'16px','lineColor':'#4ea1ff','primaryTextColor':'#e6eef7'}}}%%
+flowchart LR
+    P[Full Paper] --> SUM[LLM Summary]
+    SUM -->|embed| VEC[(Chroma:<br/>summary vectors)]
+    P -->|store raw| BS[(ByteStore:<br/>full documents)]
+    Qr[Query] -->|search clean vectors| VEC
+    VEC -->|matched id| BS
+    BS --> OUT[Return FULL paper to the LLM]
+    style VEC fill:#0d2c47,stroke:#4ea1ff
+    style BS fill:#2b1340,stroke:#b95cff
+    style OUT fill:#0c3326,stroke:#27e0a0
+      </div>
+      <p class="small">Best of both worlds: <span class="accent">precise retrieval</span> on tight summaries, <span class="accent2">rich context</span> from full documents.</p>
+      <div class="footer">Research RAG</div>
+    </section>
+
+    <!-- ============ 7. STAGE 2 ============ -->
+    <section data-background-color="#11151c">
+      <span class="stagebadge">STAGE 2</span>
+      <h2>Query Translation</h2>
+      <p>One query is limiting. Generate <span class="accent">5 semantically diverse variants</span> to beat the vocabulary-mismatch problem — plus a toolbox of strategies for harder questions.</p>
+      <table style="margin-top:14px;">
+        <tr><th>Technique</th><th>Best for</th></tr>
+        <tr><td><b>Multi-Query</b> <span class="pill">default</span></td><td>General use — 5 angles on one question</td></tr>
+        <tr><td><b>RAG Fusion (RRF)</b></td><td>Re-ranking results across multiple queries</td></tr>
+        <tr><td><b>Decomposition</b></td><td>Complex, multi-part questions</td></tr>
+        <tr><td><b>Step-Back</b></td><td>Abstract / conceptual questions</td></tr>
+        <tr><td><b>HyDE</b></td><td>Sparse or highly technical corpora</td></tr>
+      </table>
+      <p class="tiny muted" style="margin-top:14px;">File: <code>QueryTranslation.py</code></p>
+      <div class="footer">Research RAG</div>
+    </section>
+
+    <!-- ============ 8. STAGE 3 ============ -->
+    <section data-background-color="#11151c">
+      <span class="stagebadge">STAGE 3</span>
+      <h2>Query Construction &amp; Retrieval</h2>
+      <div class="grid2">
+        <div>
+          <p>The <span class="accent">SelfQueryRetriever</span> reads plain English and builds <b>structured metadata filters</b> automatically.</p>
+          <ul>
+            <li>Filter by <code>title</code>, <code>authors</code>, <code>published_year</code>, <code>word_count</code></li>
+            <li><code>enable_limit=True</code> → LLM decides how many docs to pull</li>
+            <li><code>fix_invalid=True</code> → auto-recovers from bad filters</li>
+            <li>Deduplicate by title across all 5 queries</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3 class="accent2">"…under 50,000 words"</h3>
+          <p>A pure similarity search can't honor that. The self-query layer translates it into a real filter:</p>
+          <pre style="margin-top:10px;"><code class="language-python">word_count &lt; 50000</code></pre>
+          <p class="tiny muted" style="margin-top:8px;">File: <code>QueryConstruction.py</code></p>
+        </div>
+      </div>
+      <div class="footer">Research RAG</div>
+    </section>
+
+    <!-- ============ 9. STAGE 4 — CRAG ============ -->
+    <section data-background-color="#0d1017">
+      <span class="stagebadge">STAGE 4 · THE CORE IDEA</span>
+      <h2>Corrective RAG — a <span class="accent">LangGraph</span> loop</h2>
+      <div class="mermaid" style="font-size:0.8em;">
+%%{init: {'theme':'dark','themeVariables':{'fontSize':'16px','lineColor':'#4ea1ff','primaryTextColor':'#e6eef7'}}}%%
+flowchart LR
+    START([START]) --> R[retrieve]
+    R --> G[grade_documents<br/>binary LLM relevance]
+    G --> D{decide_to_generate}
+    D -- all relevant --> GEN[generate]
+    D -- any irrelevant --> TQ[transform_query]
+    TQ --> WSN[web_search_node<br/>Tavily]
+    WSN --> GEN
+    GEN --> END([END · Answer])
+    style D fill:#3a2f0a,stroke:#ffce5a
+    style WSN fill:#0d2c47,stroke:#4ea1ff
+    style GEN fill:#0c3326,stroke:#27e0a0
+      </div>
+      <p class="small">Every retrieved document gets a <span class="warn">yes/no relevance grade</span>. If anything's off, the graph <b>rewrites the query</b> and <b>falls back to web search</b> before generating. A real feedback loop — not a one-shot pipeline.</p>
+      <p class="tiny muted">Files: <code>CRAG.py</code>, <code>graphCrag.py</code></p>
+      <div class="footer">Research RAG</div>
+    </section>
+
+    <!-- ============ 10. STAGE 5 ============ -->
+    <section data-background-color="#11151c">
+      <span class="stagebadge">STAGE 5</span>
+      <h2>Answer Generation</h2>
+      <div class="grid2">
+        <div>
+          <ul>
+            <li>Final docs + question → <code>rlm/rag-prompt</code> from LangChain Hub</li>
+            <li>Generated with <span class="accent">GPT-4o-mini</span></li>
+            <li>Streamed <b>node-by-node</b> via <code>app.stream()</code> for real-time feedback</li>
+            <li>Context kept under a <b>token budget</b> (3,500 chars) to control cost</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3 class="accent2">Grounded by design</h3>
+          <p>The answer is built only from documents that <b>passed grading</b> — or from fresh web results when the corpus came up short. Far less room to hallucinate.</p>
+        </div>
+      </div>
+      <div class="footer">Research RAG</div>
+    </section>
+
+    <!-- ============ 11. TECH STACK ============ -->
+    <section data-background-color="#0d1017">
+      <div class="kicker">Under the Hood</div>
+      <h2>Tech stack</h2>
+      <div class="mermaid" style="font-size:0.72em;">
+%%{init: {'theme':'dark','themeVariables':{'fontSize':'16px','lineColor':'#4ea1ff','primaryTextColor':'#e6eef7'}}}%%
+mindmap
+  root((Research RAG))
+    Orchestration
+      LangChain
+      LangGraph state machine
+    Models
+      GPT-4o-mini
+      OpenAI Embeddings
+    Storage
+      ChromaDB
+      InMemoryByteStore
+      pickle cache
+    Sources
+      arXiv API
+      Tavily Web Search
+    Tooling
+      PyMuPDF
+      LangSmith tracing
+      </div>
+      <div class="footer">Research RAG</div>
+    </section>
+
+    <!-- ============ 12. EXAMPLE WALKTHROUGH ============ -->
+    <section data-background-color="#11151c">
+      <div class="kicker">End to End</div>
+      <h2>A query, start to finish</h2>
+      <p class="quote">"What are the most influential papers on reinforcement learning with words less than 50,000?"</p>
+      <div class="grid2" style="margin-top:18px;">
+        <ul class="small">
+          <li><span class="accent">1.</span> Generate 5 variants on "influential RL papers"</li>
+          <li><span class="accent">2.</span> Self-query adds filter <code>word_count &lt; 50000</code></li>
+          <li><span class="accent">3.</span> Retrieve top matches per query, dedup by title</li>
+        </ul>
+        <ul class="small">
+          <li><span class="accent2">4.</span> CRAG grades each doc for RL relevance</li>
+          <li><span class="accent2">5.</span> If gaps → rewrite + Tavily web search</li>
+          <li><span class="accent2">6.</span> Stream a grounded, cited answer</li>
+        </ul>
+      </div>
+      <div class="footer">Research RAG</div>
+    </section>
+
+    <!-- ============ 13. LEARNINGS ============ -->
+    <section data-background-color="#0d1017">
+      <div class="kicker">What I Learned</div>
+      <h2>Takeaways</h2>
+      <div class="grid3">
+        <div class="card"><h3 class="accent">Retrieval &gt; prompts</h3><p>A grading + correction loop did more for answer quality than any prompt tweak.</p></div>
+        <div class="card"><h3 class="accent">Index summaries</h3><p>Searching tight summaries and returning full docs beats chunking raw PDFs.</p></div>
+        <div class="card"><h3 class="accent">Let the LLM filter</h3><p>Self-query unlocks structured questions similarity search simply can't answer.</p></div>
+        <div class="card"><h3 class="accent2">Graphs &gt; chains</h3><p>LangGraph makes conditional, self-correcting flows clean and observable.</p></div>
+        <div class="card"><h3 class="accent2">Cache aggressively</h3><p>Pickling docs + summaries turned a costly rebuild into an instant reload.</p></div>
+        <div class="card"><h3 class="accent2">Always have a fallback</h3><p>Web search means "not in the corpus" no longer means "hallucinate".</p></div>
+      </div>
+      <div class="footer">Research RAG</div>
+    </section>
+
+    <!-- ============ 14. CLOSING ============ -->
+    <section data-background-gradient="radial-gradient(circle at 70% 30%, #1d3b63 0%, #0c0f15 70%)">
+      <div class="kicker">Thanks</div>
+      <h1>Know when you're <span class="accent">wrong.</span></h1>
+      <p class="muted">Research RAG — modular, self-correcting retrieval over academic papers.</p>
+      <div style="margin-top:24px;">
+        <span class="pill">LangChain</span>
+        <span class="pill">LangGraph</span>
+        <span class="pill">ChromaDB</span>
+        <span class="pill">GPT-4o-mini</span>
+        <span class="pill">Tavily</span>
+      </div>
+      <p class="small" style="margin-top:34px;">⭐ Code &amp; docs → <span class="accent2">github.com/mpeshwe/research-rag</span></p>
+      <p class="tiny muted">Inspired by "RAG From Scratch" by LangChain.</p>
+    </section>
+
+  </div>
+</div>
+
+<!-- reveal.js + plugins -->
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/highlight/highlight.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/notes/notes.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({ startOnLoad: false, theme: 'dark' });
+
+  // Render mermaid blocks before reveal lays out slides
+  async function renderMermaid() {
+    const blocks = document.querySelectorAll('.mermaid');
+    for (let i = 0; i < blocks.length; i++) {
+      const el = blocks[i];
+      if (el.dataset.processed) continue;
+      const code = el.textContent.trim();
+      try {
+        const { svg } = await mermaid.render('m' + i, code);
+        el.innerHTML = svg;
+        el.dataset.processed = '1';
+      } catch (e) { console.error('Mermaid error in block', i, e); }
+    }
+  }
+
+  await renderMermaid();
+
+  Reveal.initialize({
+    hash: true,
+    slideNumber: 'c/t',
+    transition: 'slide',
+    width: 1280,
+    height: 720,
+    margin: 0.06,
+    plugins: [ RevealHighlight, RevealNotes ]
+  });
+</script>
+</body>
+</html>

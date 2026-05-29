@@ -53,7 +53,8 @@
       display:inline-block; background: var(--accent); color:#06121f; font-weight:800;
       border-radius: 8px; padding: 2px 12px; font-size: 0.5em; margin-bottom: 10px;
     }
-    .mermaid { background: transparent !important; }
+    .mermaid { background: transparent !important; text-align: center; }
+    .reveal .mermaid svg { max-height: 500px; max-width: 94%; height: auto !important; }
     .reveal table { font-size: 0.55em; }
     .reveal table th { color: var(--accent); border-bottom: 2px solid var(--accent); }
     .reveal pre { width: 100%; box-shadow: 0 6px 24px rgba(0,0,0,0.4); }
@@ -83,6 +84,9 @@
         <span class="pill">PyMuPDF</span>
       </div>
       <p class="small muted" style="margin-top:40px;">Built by <span class="accent2">mpeshwe</span> · <span class="accent2">namanmawandia</span></p>
+      <aside class="notes">
+        Hi everyone. Today I want to walk you through Research RAG — a project I built to fix the single biggest weakness in most retrieval-augmented generation systems: they don't know when they've retrieved the wrong thing. The headline idea is a RAG pipeline that grades its own work and corrects course before it answers. I'll cover why naive RAG fails, the five-stage architecture, and the LangGraph feedback loop that ties it together. Built on LangChain, LangGraph, ChromaDB, GPT-4o-mini, and Tavily.
+      </aside>
     </section>
 
     <!-- ============ 2. THE PROBLEM ============ -->
@@ -109,6 +113,9 @@
         </div>
       </div>
       <p class="quote" style="margin-top:30px;">The magic isn't a bigger model — it's giving the system a way to <span class="accent2">know when it's wrong.</span></p>
+      <aside class="notes">
+        Let's start with the pain. The standard RAG recipe is embed, retrieve nearest neighbors, generate. The problem is it has no quality gate. If the vector search returns something off-topic, the model still answers — fluently and confidently. Three things break it: vocabulary mismatch, where the user phrases a concept differently than the corpus; structured constraints, like "papers under fifty thousand words," which similarity search simply can't express; and the missing-knowledge case, where the answer isn't in the corpus at all and the model just makes something up. The thesis of this whole project is in that last line: the win isn't a bigger model, it's giving the system a way to know when it's wrong.
+      </aside>
       <div class="footer">Research RAG</div>
     </section>
 
@@ -127,6 +134,9 @@
         <span class="big-num">6</span> <span class="muted">RAG strategies</span> &nbsp;·&nbsp;
         <span class="big-num">1</span> <span class="muted">LangGraph feedback loop</span>
       </div>
+      <aside class="notes">
+        So what is Research RAG? At its core it's a modular system for searching academic papers from arXiv. Three capabilities set it apart. First, it attacks every question from multiple angles — five query variants by default, plus a toolbox of strategies like RAG Fusion, HyDE, Step-Back, and Decomposition. Second, it lets the LLM build structured metadata filters from plain English, so it can filter by year, authors, or word count. Third, and most importantly, it's self-correcting: it grades its own retrievals and, when they fall short, rewrites the query and reaches out to web search. Five stages, six retrieval strategies, one feedback loop. Let's walk the stages.
+      </aside>
       <div class="footer">Research RAG</div>
     </section>
 
@@ -138,17 +148,25 @@
 %%{init: {'theme':'dark','themeVariables':{'fontSize':'15px','primaryColor':'#1a212c','primaryBorderColor':'#4ea1ff','lineColor':'#4ea1ff','primaryTextColor':'#e6eef7'}}}%%
 flowchart TD
     Q([User Question]) --> S1
-    S1["STAGE 1 · Ingestion &amp; Indexing<br/>arXiv → PyMuPDF → summaries → ChromaDB"] --> S2
-    S2["STAGE 2 · Query Translation<br/>5 query variants + optional strategies"] --> S3
-    S3["STAGE 3 · Construction &amp; Retrieval<br/>SelfQueryRetriever + metadata filters"] --> S4
-    S4{"STAGE 4 · Corrective RAG<br/>grade every doc — all relevant?"}
-    S4 -- Yes --> S5["STAGE 5 · Answer Generation<br/>rlm/rag-prompt → GPT-4o-mini · streamed"]
-    S4 -- No --> WS["Rewrite query → Web Search (Tavily)"] --> S5
+    S1["`**STAGE 1 · Ingestion & Indexing**
+arXiv → PyMuPDF → summaries → ChromaDB`"] --> S2
+    S2["`**STAGE 2 · Query Translation**
+5 query variants + optional strategies`"] --> S3
+    S3["`**STAGE 3 · Construction & Retrieval**
+SelfQueryRetriever + metadata filters`"] --> S4
+    S4{"`**STAGE 4 · Corrective RAG**
+grade every doc — all relevant?`"}
+    S4 -- Yes --> S5["`**STAGE 5 · Answer Generation**
+rlm/rag-prompt → GPT-4o-mini · streamed`"]
+    S4 -- No --> WS["`Rewrite query → Web Search (Tavily)`"] --> S5
     S5 --> ANS([Grounded Answer])
     style S4 fill:#3a2f0a,stroke:#ffce5a
     style WS fill:#0d2c47,stroke:#4ea1ff
     style S5 fill:#0c3326,stroke:#27e0a0
       </div>
+      <aside class="notes">
+        Here's the whole system on one slide. A question enters at the top. Stage one is ingestion and indexing — done ahead of time. Stage two translates the question into multiple queries. Stage three constructs structured filters and retrieves candidate documents. Stage four is the corrective core — it grades every document. If they're all relevant, we go straight to generation. If any are irrelevant, we branch: rewrite the query, run a web search through Tavily, and only then generate. The key visual is that diamond in stage four and the "No" branch — that's the self-correction. Everything else is in service of feeding that decision good inputs. Let's zoom into each stage.
+      </aside>
       <div class="footer">Research RAG</div>
     </section>
 
@@ -172,6 +190,9 @@ flowchart TD
           <p style="margin-top:14px;"><span class="muted">Files:</span> <code>docDownload.py</code>, <code>indexing.py</code></p>
         </div>
       </div>
+      <aside class="notes">
+        Stage one is the offline groundwork. We download papers from arXiv across six categories spanning machine learning, AI, NLP, robotics, and crypto. PyMuPDF extracts the full text and metadata. Then — and this is a design choice I'll expand on next — we summarize each paper with GPT-4o-mini and index those summaries in ChromaDB. The expensive part is embedding and summarizing, so we cache everything to disk with pickle. The first run pays the OpenAI cost once; every run after that loads in seconds. This is the difference between a demo you dread re-running and one you iterate on freely.
+      </aside>
       <div class="footer">Research RAG</div>
     </section>
 
@@ -184,8 +205,10 @@ flowchart TD
 %%{init: {'theme':'dark','themeVariables':{'fontSize':'16px','lineColor':'#4ea1ff','primaryTextColor':'#e6eef7'}}}%%
 flowchart LR
     P[Full Paper] --> SUM[LLM Summary]
-    SUM -->|embed| VEC[(Chroma:<br/>summary vectors)]
-    P -->|store raw| BS[(ByteStore:<br/>full documents)]
+    SUM -->|embed| VEC[("`Chroma:
+summary vectors`")]
+    P -->|store raw| BS[("`ByteStore:
+full documents`")]
     Qr[Query] -->|search clean vectors| VEC
     VEC -->|matched id| BS
     BS --> OUT[Return FULL paper to the LLM]
@@ -194,6 +217,9 @@ flowchart LR
     style OUT fill:#0c3326,stroke:#27e0a0
       </div>
       <p class="small">Best of both worlds: <span class="accent">precise retrieval</span> on tight summaries, <span class="accent2">rich context</span> from full documents.</p>
+      <aside class="notes">
+        Here's that indexing choice in detail — it uses LangChain's MultiVectorRetriever pattern. Instead of embedding raw paper text, we embed a concise LLM-generated summary of each paper. Summaries are short, dense, and noise-free, so similarity search over them is far more precise. But we don't want to answer from a summary — so separately we keep the full document in a byte store. At query time we search the clean summary vectors, get a match ID, and use that ID to pull back the complete paper for the model. Precise retrieval, rich context — you don't have to trade one for the other.
+      </aside>
       <div class="footer">Research RAG</div>
     </section>
 
@@ -211,6 +237,9 @@ flowchart LR
         <tr><td><b>HyDE</b></td><td>Sparse or highly technical corpora</td></tr>
       </table>
       <p class="tiny muted" style="margin-top:14px;">File: <code>QueryTranslation.py</code></p>
+      <aside class="notes">
+        Stage two solves vocabulary mismatch. A single query is one point in embedding space — if the user's phrasing doesn't match the corpus, you miss good documents. So by default we generate five semantically diverse rewordings of the question and retrieve for all of them. Beyond that, the codebase ships five interchangeable strategies. RAG Fusion re-ranks across queries using reciprocal rank fusion. Decomposition splits complex multi-part questions into sub-questions. Step-Back asks a more abstract version first, great for conceptual questions. And HyDE generates a hypothetical answer document to search with, which shines on sparse technical corpora. You pick the tool that fits the question.
+      </aside>
       <div class="footer">Research RAG</div>
     </section>
 
@@ -235,6 +264,9 @@ flowchart LR
           <p class="tiny muted" style="margin-top:8px;">File: <code>QueryConstruction.py</code></p>
         </div>
       </div>
+      <aside class="notes">
+        Stage three is where structure comes in. LangChain's SelfQueryRetriever uses the LLM to read the natural-language question and emit a structured filter over metadata — title, authors, published year, word count. The flags matter: enable_limit lets the model decide how many documents to return, and fix_invalid makes it gracefully recover from a malformed filter instead of crashing. The example on the right is the punchline — "papers under fifty thousand words" is impossible for pure similarity search, but trivial once the LLM turns it into word_count less than fifty thousand. Finally we deduplicate by title across all five queries so we don't grade the same paper twice.
+      </aside>
       <div class="footer">Research RAG</div>
     </section>
 
@@ -246,11 +278,13 @@ flowchart LR
 %%{init: {'theme':'dark','themeVariables':{'fontSize':'16px','lineColor':'#4ea1ff','primaryTextColor':'#e6eef7'}}}%%
 flowchart LR
     START([START]) --> R[retrieve]
-    R --> G[grade_documents<br/>binary LLM relevance]
+    R --> G["`grade_documents
+binary LLM relevance`"]
     G --> D{decide_to_generate}
     D -- all relevant --> GEN[generate]
     D -- any irrelevant --> TQ[transform_query]
-    TQ --> WSN[web_search_node<br/>Tavily]
+    TQ --> WSN["`web_search_node
+Tavily`"]
     WSN --> GEN
     GEN --> END([END · Answer])
     style D fill:#3a2f0a,stroke:#ffce5a
@@ -259,6 +293,9 @@ flowchart LR
       </div>
       <p class="small">Every retrieved document gets a <span class="warn">yes/no relevance grade</span>. If anything's off, the graph <b>rewrites the query</b> and <b>falls back to web search</b> before generating. A real feedback loop — not a one-shot pipeline.</p>
       <p class="tiny muted">Files: <code>CRAG.py</code>, <code>graphCrag.py</code></p>
+      <aside class="notes">
+        This is the heart of the project — Corrective RAG, built as a LangGraph state machine. Walk the graph: retrieve injects our candidate documents into state. Grade_documents asks the LLM for a binary yes-or-no relevance judgment on each one. Then decide_to_generate is a conditional edge — the branch point. If every document is relevant, we go straight to generate. If any document is irrelevant, we don't just shrug and answer anyway — we transform the query into a better web-search phrasing, hit Tavily for fresh results, and feed those into generation. That's the loop that lets the system recover from bad retrieval. Modeling this as a graph rather than a linear chain is what makes the conditional logic clean and, with LangSmith, fully observable.
+      </aside>
       <div class="footer">Research RAG</div>
     </section>
 
@@ -280,6 +317,9 @@ flowchart LR
           <p>The answer is built only from documents that <b>passed grading</b> — or from fresh web results when the corpus came up short. Far less room to hallucinate.</p>
         </div>
       </div>
+      <aside class="notes">
+        Stage five generates the answer. We use the community-standard rlm/rag-prompt from LangChain Hub, run it through GPT-4o-mini, and stream the output node-by-node so the user sees progress in real time. We also cap the context at around thirty-five hundred characters to keep token costs predictable. The important property is on the right: the answer is grounded only in documents that passed grading, or in fresh web results when the corpus came up short. Because nothing ungraded reaches the prompt, there's far less room to hallucinate.
+      </aside>
       <div class="footer">Research RAG</div>
     </section>
 
@@ -308,6 +348,9 @@ mindmap
       PyMuPDF
       LangSmith tracing
       </div>
+      <aside class="notes">
+        Quick tour of the stack. LangChain and LangGraph handle orchestration and the state machine. GPT-4o-mini does the heavy lifting — generation, summarization, grading, and query rewriting — paired with OpenAI embeddings. Storage is ChromaDB for vectors, an in-memory byte store for full documents, and pickle for the disk cache. Knowledge comes from the arXiv API and, as a fallback, Tavily web search. And for tooling, PyMuPDF parses the PDFs while LangSmith traces every LLM call end to end, which was invaluable for debugging the grading loop.
+      </aside>
       <div class="footer">Research RAG</div>
     </section>
 
@@ -328,6 +371,9 @@ mindmap
           <li><span class="accent2">6.</span> Stream a grounded, cited answer</li>
         </ul>
       </div>
+      <aside class="notes">
+        Let's make it concrete with one query: "the most influential papers on reinforcement learning with words less than fifty thousand." Watch every stage fire. Stage two generates five variants around "influential RL papers." Stage three's self-query attaches the word_count filter — the part naive RAG can't do. We retrieve per query and deduplicate. Stage four grades each result for actual RL relevance. If there are gaps, it rewrites and pulls from the web. And finally we stream a grounded answer. One sentence from the user exercises the entire pipeline.
+      </aside>
       <div class="footer">Research RAG</div>
     </section>
 
@@ -343,6 +389,9 @@ mindmap
         <div class="card"><h3 class="accent2">Cache aggressively</h3><p>Pickling docs + summaries turned a costly rebuild into an instant reload.</p></div>
         <div class="card"><h3 class="accent2">Always have a fallback</h3><p>Web search means "not in the corpus" no longer means "hallucinate".</p></div>
       </div>
+      <aside class="notes">
+        Six things I'm taking away from this build. One: retrieval quality beats prompt engineering — adding the grading-and-correction loop moved the needle more than any prompt I wrote. Two: index summaries, not raw chunks — it improved precision noticeably. Three: let the LLM build filters — self-query unlocked a whole class of structured questions. Four: model complex flows as graphs, not chains — LangGraph kept the conditional logic clean and observable. Five: cache aggressively — it changed how fast I could iterate. And six: always have a fallback — web search means "not in the corpus" stops meaning "make it up."
+      </aside>
       <div class="footer">Research RAG</div>
     </section>
 
@@ -360,6 +409,9 @@ mindmap
       </div>
       <p class="small" style="margin-top:34px;">⭐ Code &amp; docs → <span class="accent2">github.com/mpeshwe/research-rag</span></p>
       <p class="tiny muted">Inspired by "RAG From Scratch" by LangChain.</p>
+      <aside class="notes">
+        To close: the one line I want you to remember is "know when you're wrong." That single principle — grading retrieval and correcting course — is what separates a RAG demo from a RAG system you'd actually trust. Research RAG is modular and open source; the code and docs are on GitHub, and it builds on LangChain's excellent "RAG From Scratch." Happy to dig into any stage, the LangGraph implementation, or the cost trade-offs. Thank you.
+      </aside>
     </section>
 
   </div>
@@ -371,7 +423,13 @@ mindmap
 <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/notes/notes.js"></script>
 <script type="module">
   import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
-  mermaid.initialize({ startOnLoad: false, theme: 'dark' });
+  mermaid.initialize({
+    startOnLoad: false,
+    theme: 'dark',
+    securityLevel: 'loose',
+    flowchart: { htmlLabels: true, curve: 'basis', useMaxWidth: true },
+    mindmap: { useMaxWidth: true }
+  });
 
   // Render mermaid blocks before reveal lays out slides
   async function renderMermaid() {

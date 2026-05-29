@@ -1,0 +1,14 @@
+{
+  "name": "research-rag-slides",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Render tooling for the Research RAG slide deck (HTML -> PDF + PNGs).",
+  "scripts": {
+    "render": "node render.mjs"
+  },
+  "devDependencies": {
+    "pdf-lib": "^1.17.1",
+    "puppeteer-core": "^23.0.0"
+  }
+}
